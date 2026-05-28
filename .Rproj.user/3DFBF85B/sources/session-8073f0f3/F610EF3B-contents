@@ -1,0 +1,1000 @@
+# app.R
+# Drug Synergy Predictor with Gen-AI - CLEAN PINK/PURPLE THEME
+# Professional, elegant, fully functional - NO UNICODE ERRORS
+
+library(shiny)
+library(shinydashboard)
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(DT)
+
+# ============================================
+# GENERATE SYNTHETIC DRUG SYNERGY DATA
+# ============================================
+
+generate_synergy_data <- function() {
+  set.seed(42)
+  
+  drugs <- c(
+    "Pembrolizumab", "Nivolumab", "Cisplatin", "Carboplatin", 
+    "Docetaxel", "Paclitaxel", "Gemcitabine", "5-Fluorouracil",
+    "Oxaliplatin", "Irinotecan", "Bevacizumab", "Cetuximab",
+    "Trastuzumab", "Olaparib", "Venetoclax", "Ibrutinib"
+  )
+  
+  cancer_types <- c("Breast", "Lung", "Colorectal", "Pancreatic", "Ovarian", "Melanoma")
+  
+  n_pairs <- 350
+  drug_pairs <- data.frame()
+  
+  for(i in 1:n_pairs) {
+    drug1 <- sample(drugs, 1)
+    drug2 <- sample(drugs[drugs != drug1], 1)
+    base_synergy <- runif(1, -20, 85)
+    
+    if(grepl("mab", drug1) && grepl("platin", drug2)) {
+      base_synergy <- base_synergy + 35
+    }
+    if(grepl("PARP", drug1) || grepl("PARP", drug2)) {
+      base_synergy <- base_synergy + 30
+    }
+    if(grepl("nib", drug1) || grepl("nib", drug2)) {
+      base_synergy <- base_synergy + 20
+    }
+    
+    drug_pairs <- rbind(drug_pairs, data.frame(
+      drug1 = drug1,
+      drug2 = drug2,
+      cancer_type = sample(cancer_types, 1),
+      loewe_score = round(pmin(100, pmax(-20, base_synergy + rnorm(1, 0, 8))), 1),
+      bliss_score = round(pmin(100, pmax(-20, base_synergy + rnorm(1, 0, 7))), 1),
+      zip_score = round(pmin(100, pmax(-20, base_synergy + rnorm(1, 0, 9))), 1),
+      clinical_trial_phase = sample(c("Phase I", "Phase II", "Phase III", "Approved"), 1, 
+                                    prob = c(0.35, 0.35, 0.2, 0.1)),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  drug_pairs <- unique(drug_pairs)
+  drug_pairs$synergy_class <- ifelse(
+    drug_pairs$loewe_score > 35, "SYNERGISTIC",
+    ifelse(drug_pairs$loewe_score < 0, "ANTAGONISTIC", "ADDITIVE")
+  )
+  drug_pairs$color_code <- ifelse(
+    drug_pairs$loewe_score > 35, "#E91E63",
+    ifelse(drug_pairs$loewe_score > 15, "#9B59B6", "#C39BD3")
+  )
+  
+  return(drug_pairs)
+}
+
+synergy_data <- generate_synergy_data()
+
+# ============================================
+# PREDICTION FUNCTION
+# ============================================
+
+predict_synergy <- function(drug1, drug2, cancer_type) {
+  match_idx <- which(
+    ((synergy_data$drug1 == drug1 & synergy_data$drug2 == drug2) |
+       (synergy_data$drug1 == drug2 & synergy_data$drug2 == drug1)) &
+      synergy_data$cancer_type == cancer_type
+  )
+  
+  if(length(match_idx) > 0) {
+    return(synergy_data[match_idx[1], ])
+  } else {
+    cancer_scores <- synergy_data[synergy_data$cancer_type == cancer_type, "loewe_score"]
+    avg_score <- mean(cancer_scores)
+    return(data.frame(
+      drug1 = drug1,
+      drug2 = drug2,
+      cancer_type = cancer_type,
+      loewe_score = round(avg_score, 1),
+      bliss_score = round(avg_score, 1),
+      zip_score = round(avg_score, 1),
+      synergy_class = ifelse(avg_score > 35, "SYNERGISTIC", 
+                             ifelse(avg_score < 0, "ANTAGONISTIC", "ADDITIVE")),
+      clinical_trial_phase = "Predicted",
+      color_code = ifelse(avg_score > 35, "#E91E63", ifelse(avg_score > 15, "#9B59B6", "#C39BD3"))
+    ))
+  }
+}
+
+# ============================================
+# AI EXPLANATION FUNCTION - NO SPECIAL CHARACTERS
+# ============================================
+
+get_ai_explanation <- function(drug1, drug2, cancer_type, synergy_score, synergy_class) {
+  
+  if((grepl("mab", drug1) || grepl("mab", drug2)) && 
+     (grepl("platin", drug1) || grepl("platin", drug2) || 
+      grepl("taxel", drug1) || grepl("taxel", drug2))) {
+    return(paste0(
+      "=", paste(rep("=", 60), collapse=""), "\n",
+      "                 MECHANISM OF ACTION                         \n",
+      "=", paste(rep("=", 60), collapse=""), "\n\n",
+      "DRUG COMBINATION: ", drug1, " + ", drug2, "\n",
+      "CANCER TYPE: ", cancer_type, "\n\n",
+      "------------------------------------------------------------\n",
+      "SYNERGISTIC MECHANISM:\n",
+      "------------------------------------------------------------\n",
+      "[1] ", drug2, " induces immunogenic cell death\n",
+      "[2] ", drug1, " blocks the PD-1/PD-L1 immune checkpoint\n",
+      "[3] The combination creates a sustained anti-tumor response\n",
+      "[4] Enhanced antigen presentation leads to epitope spreading\n\n",
+      "------------------------------------------------------------\n",
+      "CLINICAL EVIDENCE:\n",
+      "------------------------------------------------------------\n",
+      "Synergy Score: ", synergy_score, "/100 (", synergy_class, ")\n",
+      "Multiple Phase III trials confirmed efficacy\n",
+      "FDA approved for first-line treatment\n\n",
+      "------------------------------------------------------------\n",
+      "PREDICTIVE BIOMARKERS:\n",
+      "------------------------------------------------------------\n",
+      "[+] PD-L1 expression (TPS or CPS) - High priority\n",
+      "[+] Tumor Mutational Burden (TMB) - Medium priority\n",
+      "[+] Microsatellite Instability (MSI) status\n"
+    ))
+  }
+  
+  if(grepl("PARP", drug1) || grepl("PARP", drug2) || grepl("parib", drug1) || grepl("parib", drug2)) {
+    return(paste0(
+      "=", paste(rep("=", 60), collapse=""), "\n",
+      "                 MECHANISM OF ACTION                         \n",
+      "=", paste(rep("=", 60), collapse=""), "\n\n",
+      "DRUG COMBINATION: ", drug1, " + ", drug2, "\n",
+      "CANCER TYPE: ", cancer_type, "\n\n",
+      "------------------------------------------------------------\n",
+      "SYNERGISTIC MECHANISM (Synthetic Lethality):\n",
+      "------------------------------------------------------------\n",
+      "[1] PARP inhibitor blocks DNA single-strand break repair\n",
+      "[2] Chemotherapy induces DNA double-strand breaks\n",
+      "[3] HRD-deficient tumors cannot repair damage\n",
+      "[4] Selective killing of cancer cells\n\n",
+      "------------------------------------------------------------\n",
+      "CLINICAL EVIDENCE:\n",
+      "------------------------------------------------------------\n",
+      "Synergy Score: ", synergy_score, "/100 (", synergy_class, ")\n",
+      "Approved for BRCA-mutated cancers\n\n",
+      "------------------------------------------------------------\n",
+      "PREDICTIVE BIOMARKERS (Required):\n",
+      "------------------------------------------------------------\n",
+      "[+] BRCA1/2 mutation - ESSENTIAL\n",
+      "[+] Homologous Recombination Deficiency (HRD) score\n",
+      "[+] RAD51 foci formation\n"
+    ))
+  }
+  
+  return(paste0(
+    "=", paste(rep("=", 60), collapse=""), "\n",
+    "                 MECHANISM OF ACTION                         \n",
+    "=", paste(rep("=", 60), collapse=""), "\n\n",
+    "DRUG COMBINATION: ", drug1, " + ", drug2, "\n",
+    "CANCER TYPE: ", cancer_type, "\n\n",
+    "------------------------------------------------------------\n",
+    "PROPOSED SYNERGISTIC MECHANISM:\n",
+    "------------------------------------------------------------\n",
+    "[1] Complementary pathway inhibition\n",
+    "[2] Non-overlapping resistance mechanisms\n",
+    "[3] Enhanced apoptotic signaling\n",
+    "[4] Immune modulation effects\n\n",
+    "------------------------------------------------------------\n",
+    "PREDICTED SYNERGY ANALYSIS:\n",
+    "------------------------------------------------------------\n",
+    "Predicted Synergy Score: ", synergy_score, "/100\n",
+    "Classification: ", synergy_class, "\n\n",
+    "------------------------------------------------------------\n",
+    "RECOMMENDED VALIDATION PATHWAY:\n",
+    "------------------------------------------------------------\n",
+    "[1] In vitro combination index (CI) assays\n",
+    "[2] Patient-derived organoid (PDO) models\n",
+    "[3] Xenograft studies\n",
+    "[4] Biomarker analysis from clinical datasets\n"
+  ))
+}
+
+# ============================================
+# CLEAN CSS - NO UNICODE CHARACTERS
+# ============================================
+
+custom_css <- "
+.content-wrapper, .right-side {
+  background: linear-gradient(135deg, #FCE4EC 0%, #F3E5F5 30%, #EDE7F6 70%, #E8EAF6 100%);
+  background-attachment: fixed;
+}
+
+.main-header .logo {
+  background: linear-gradient(135deg, #4A0E4E 0%, #6A1B9A 50%, #7B2D8E 100%) !important;
+  font-weight: bold;
+  font-size: 18px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.main-header .navbar {
+  background: linear-gradient(135deg, #7B2D8E 0%, #9B59B6 50%, #C39BD3 100%) !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.main-sidebar {
+  background: linear-gradient(180deg, #4A0E4E 0%, #6A1B9A 30%, #4A0E4E 100%) !important;
+  box-shadow: 2px 0 15px rgba(0,0,0,0.1);
+}
+
+.sidebar-menu > li > a {
+  color: #F8BBD0 !important;
+  transition: all 0.3s ease;
+  font-size: 14px;
+}
+
+.sidebar-menu > li > a:hover {
+  background: linear-gradient(90deg, #E91E63 0%, #F06292 100%) !important;
+  color: #FFFFFF !important;
+  transform: translateX(8px);
+  box-shadow: 0 2px 8px rgba(233,30,99,0.3);
+}
+
+.sidebar-menu > li.active > a {
+  background: linear-gradient(90deg, #E91E63 0%, #F06292 100%) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(233,30,99,0.4);
+}
+
+.box {
+  border-radius: 16px;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+  border: none;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.box:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+}
+
+.box-header {
+  border-radius: 16px 16px 0 0 !important;
+  background: linear-gradient(135deg, #E91E63 0%, #9B59B6 100%) !important;
+  padding: 12px 15px !important;
+}
+
+.box-title {
+  color: white !important;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #E91E63 0%, #C2185B 50%, #9B59B6 100%) !important;
+  border: none !important;
+  border-radius: 30px !important;
+  padding: 12px 30px !important;
+  font-weight: bold !important;
+  font-size: 14px !important;
+  transition: all 0.3s ease !important;
+  box-shadow: 0 4px 15px rgba(233,30,99,0.3);
+}
+
+.btn-success:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 20px rgba(233,30,99,0.5);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #9B59B6 0%, #7B2D8E 100%) !important;
+  border: none !important;
+  border-radius: 30px !important;
+  padding: 10px 25px !important;
+  font-weight: bold !important;
+}
+
+.small-box {
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.small-box:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+}
+
+.small-box .icon {
+  color: rgba(255,255,255,0.25);
+}
+
+.bg-green {
+  background: linear-gradient(135deg, #E91E63 0%, #C2185B 100%) !important;
+}
+
+.bg-purple {
+  background: linear-gradient(135deg, #9B59B6 0%, #7B2D8E 100%) !important;
+}
+
+.bg-blue {
+  background: linear-gradient(135deg, #FF80AB 0%, #F06292 100%) !important;
+}
+
+.bg-yellow {
+  background: linear-gradient(135deg, #F06292 0%, #E91E63 100%) !important;
+}
+
+.bg-red {
+  background: linear-gradient(135deg, #C2185B 0%, #880E4F 100%) !important;
+}
+
+.info-box {
+  border-radius: 16px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+  transition: all 0.3s ease;
+}
+
+.info-box:hover {
+  transform: translateY(-3px);
+}
+
+.dataTables_wrapper {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.dataTables_filter input {
+  border-radius: 25px;
+  border: 1px solid #E91E63;
+  padding: 5px 15px;
+}
+
+.dataTables_filter input:focus {
+  border-color: #9B59B6;
+  box-shadow: 0 0 5px rgba(155,89,182,0.3);
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #E91E63 0%, #9B59B6 100%) !important;
+  border-radius: 10px;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tab-content {
+  animation: fadeInUp 0.6s ease;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F3E5F5;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #E91E63 0%, #9B59B6 100%);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #C2185B 0%, #7B2D8E 100%);
+}
+
+.custom-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: bold;
+  color: white;
+}
+
+.badge-synergistic {
+  background: linear-gradient(135deg, #E91E63 0%, #C2185B 100%);
+}
+
+.badge-additive {
+  background: linear-gradient(135deg, #9B59B6 0%, #7B2D8E 100%);
+}
+
+.badge-antagonistic {
+  background: linear-gradient(135deg, #C39BD3 0%, #8E24AA 100%);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+"
+
+# ============================================
+# SHINY UI
+# ============================================
+
+ui <- dashboardPage(
+  dashboardHeader(
+    title = tags$div(
+      tags$span(style = "font-size: 20px; font-weight: bold;", "Drug Synergy Predictor"),
+      tags$span(style = "font-size: 11px; opacity: 0.9; margin-left: 5px;", "Gen-AI Powered")
+    ),
+    titleWidth = 350
+  ),
+  
+  dashboardSidebar(
+    width = 280,
+    sidebarMenu(
+      id = "sidebar",
+      menuItem("Discover Combinations", tabName = "search", 
+               icon = icon("search", class = "fa-fw"), selected = TRUE),
+      menuItem("Synergy Heatmaps", tabName = "heatmap", 
+               icon = icon("th", class = "fa-fw")),
+      menuItem("AI Drug Discovery", tabName = "ai", 
+               icon = icon("robot", class = "fa-fw")),
+      menuItem("Clinical Database", tabName = "data", 
+               icon = icon("database", class = "fa-fw"))
+    )
+  ),
+  
+  dashboardBody(
+    tags$head(
+      tags$style(HTML(custom_css)),
+      tags$link(rel = "stylesheet", href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css")
+    ),
+    
+    tabItems(
+      # SEARCH TAB
+      tabItem(tabName = "search",
+              fluidRow(
+                column(12,
+                       tags$div(style = "text-align: center; margin-bottom: 35px; margin-top: 10px;",
+                                tags$h1(style = "color: #E91E63; font-weight: bold; margin-bottom: 5px;",
+                                        tags$i(class = "fas fa-dna"), " AI-Powered Drug Synergy Discovery"),
+                                tags$p(style = "color: #6A1B9A; font-size: 16px; opacity: 0.9;",
+                                       "Intelligent prediction of optimal drug combinations using machine learning")
+                       )
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-flask"), " Drug Combination Selector"),
+                  status = "primary", solidHeader = TRUE, width = 12,
+                  fluidRow(
+                    column(4,
+                           selectInput("drug1", tags$b("First Drug"), 
+                                       choices = sort(unique(c(synergy_data$drug1, synergy_data$drug2))),
+                                       selected = "Pembrolizumab")
+                    ),
+                    column(4,
+                           selectInput("cancer_type", tags$b("Cancer Type"), 
+                                       choices = unique(synergy_data$cancer_type),
+                                       selected = "Lung")
+                    ),
+                    column(4,
+                           selectInput("drug2", tags$b("Second Drug"), 
+                                       choices = sort(unique(c(synergy_data$drug1, synergy_data$drug2))),
+                                       selected = "Cisplatin")
+                    )
+                  ),
+                  br(),
+                  fluidRow(
+                    column(12,
+                           div(style = "display: flex; justify-content: center;",
+                               actionButton("predict_btn", "PREDICT SYNERGY", 
+                                            class = "btn-success", icon = icon("magic"), width = "300px")
+                           )
+                    )
+                  ),
+                  br(),
+                  fluidRow(
+                    column(12,
+                           valueBoxOutput("predicted_score", width = 12)
+                    )
+                  )
+                )
+              ),
+              
+              fluidRow(
+                column(12,
+                       div(
+                         style = "background: rgba(255,255,255,0.92); border-radius: 20px; padding: 25px; margin-bottom: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.05);",
+                         div(style = "display: flex; align-items: center; gap: 15px; margin-bottom: 20px;",
+                             div(style = "width: 8px; height: 40px; background: linear-gradient(135deg, #E91E63 0%, #9B59B6 100%); border-radius: 4px;"),
+                             h4(tags$i(class = "fas fa-chart-line"), " AI-Powered Synergy Analysis", 
+                                style = "color: #C2185B; margin: 0; font-weight: bold;")
+                         ),
+                         hr(style = "border-top: 2px solid #FCE4EC;"),
+                         div(textOutput("synergy_result"), 
+                             style = "font-size: 16px; font-weight: 500; color: #4A0E4E; margin: 15px 0;"),
+                         hr(style = "border-top: 1px solid #F3E5F5;"),
+                         div(textOutput("ai_explanation"), 
+                             style = "font-size: 13px; line-height: 1.7; background-color: #FFF; padding: 20px; border-radius: 12px; border-left: 5px solid #E91E63; font-family: monospace; white-space: pre-wrap;"),
+                         br(),
+                         div(style = "background: #FCE4EC; padding: 15px; border-radius: 12px;",
+                             h5(tags$i(class = "fas fa-clipboard-list"), " Recommended Validation Pathway:", 
+                                style = "color: #C2185B; margin-top: 0; margin-bottom: 10px;"),
+                             tags$ul(style = "margin-bottom: 0;",
+                                     tags$li(tags$strong("Step 1:"), " In vitro combination index (CI) assays"),
+                                     tags$li(tags$strong("Step 2:"), " Patient-derived organoid (PDO) models"),
+                                     tags$li(tags$strong("Step 3:"), " In vivo xenograft studies"),
+                                     tags$li(tags$strong("Step 4:"), " Biomarker analysis from clinical datasets")
+                             )
+                         )
+                       )
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-trophy"), " Top 20 Synergistic Combinations"),
+                  status = "success", solidHeader = TRUE, width = 12,
+                  DTOutput("top_combinations_table")
+                )
+              )
+      ),
+      
+      # HEATMAP TAB
+      tabItem(tabName = "heatmap",
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-fire"), " Drug Synergy Interaction Matrix"),
+                  status = "primary", solidHeader = TRUE, width = 12,
+                  div(plotlyOutput("synergy_heatmap", height = "620px"), 
+                      style = "border-radius: 12px; overflow: hidden;")
+                )
+              ),
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-chart-bar"), " Synergy Distribution by Cancer Type"),
+                  status = "info", solidHeader = TRUE, width = 12,
+                  plotlyOutput("cancer_boxplot", height = "450px")
+                )
+              ),
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-chart-pie"), " Clinical Trial Phase Distribution"),
+                  status = "warning", solidHeader = TRUE, width = 12,
+                  plotlyOutput("phase_pie", height = "400px")
+                )
+              )
+      ),
+      
+      # AI TAB
+      tabItem(tabName = "ai",
+              fluidRow(
+                column(12,
+                       div(style = "text-align: center; margin-bottom: 30px; margin-top: 10px;",
+                           h1(style = "color: #E91E63; font-weight: bold;", 
+                              tags$i(class = "fas fa-brain"), " Gen-AI Drug Discovery Assistant"),
+                           p(style = "color: #6A1B9A; font-size: 16px;", 
+                             "Ask about drug combinations, mechanisms, clinical evidence, and biomarkers")
+                       )
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-comments"), " Ask the AI Assistant"),
+                  status = "primary", solidHeader = TRUE, width = 12,
+                  textAreaInput("ai_query", "",
+                                rows = 3,
+                                placeholder = "Examples:\n- What are the best immunotherapy combinations for NSCLC?\n- Explain PARP inhibitor synergy with platinum chemotherapy\n- What biomarkers predict response to checkpoint inhibitors?\n- Summarize Phase III trials for PD-1 combinations",
+                                width = "100%"),
+                  br(),
+                  div(style = "display: flex; justify-content: center;",
+                      actionButton("ask_ai", "ASK AI ASSISTANT", class = "btn-primary", 
+                                   icon = icon("comment-dots"), width = "300px")
+                  ),
+                  br(), br(),
+                  div(textOutput("ai_response"), 
+                      style = "background: linear-gradient(135deg, #FFFFFF 0%, #FCE4EC 100%); padding: 25px; border-radius: 16px; min-height: 250px; font-size: 14px; line-height: 1.6; border-left: 5px solid #E91E63; white-space: pre-wrap; font-family: monospace;")
+                )
+              ),
+              
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-lightbulb"), " Suggested Queries"),
+                  status = "info", solidHeader = TRUE, width = 12,
+                  div(style = "display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;",
+                      actionButton("suggest1", "Immunotherapy for NSCLC", 
+                                   style = "background: linear-gradient(135deg, #FCE4EC 0%, #F3E5F5 100%); border: 1px solid #E91E63; border-radius: 30px; padding: 8px 20px; font-size: 13px; color: #C2185B; font-weight: bold;"),
+                      actionButton("suggest2", "PARP Inhibitor Synergy", 
+                                   style = "background: linear-gradient(135deg, #FCE4EC 0%, #F3E5F5 100%); border: 1px solid #E91E63; border-radius: 30px; padding: 8px 20px; font-size: 13px; color: #C2185B; font-weight: bold;"),
+                      actionButton("suggest3", "Predictive Biomarkers", 
+                                   style = "background: linear-gradient(135deg, #FCE4EC 0%, #F3E5F5 100%); border: 1px solid #E91E63; border-radius: 30px; padding: 8px 20px; font-size: 13px; color: #C2185B; font-weight: bold;"),
+                      actionButton("suggest4", "Phase III Trials", 
+                                   style = "background: linear-gradient(135deg, #FCE4EC 0%, #F3E5F5 100%); border: 1px solid #E91E63; border-radius: 30px; padding: 8px 20px; font-size: 13px; color: #C2185B; font-weight: bold;")
+                  )
+                )
+              )
+      ),
+      
+      # DATA TAB
+      tabItem(tabName = "data",
+              fluidRow(
+                valueBoxOutput("total_combinations"),
+                valueBoxOutput("synergistic_count"),
+                valueBoxOutput("clinical_trials")
+              ),
+              
+              fluidRow(
+                box(
+                  title = tags$div(tags$i(class = "fas fa-database"), " Drug Synergy Database"),
+                  status = "primary", solidHeader = TRUE, width = 12,
+                  DTOutput("full_data_table")
+                )
+              )
+      )
+    )
+  )
+)
+
+# ============================================
+# SHINY SERVER
+# ============================================
+
+server <- function(input, output, session) {
+  
+  values <- reactiveValues(
+    current_prediction = NULL,
+    current_explanation = NULL
+  )
+  
+  # Handle suggestion buttons
+  observeEvent(input$suggest1, {
+    updateTextAreaInput(session, "ai_query", value = "What are the best immunotherapy combinations for NSCLC?")
+    Sys.sleep(0.2)
+    session$sendCustomMessage("click_ask", list())
+    ask_ai_click()
+  })
+  
+  observeEvent(input$suggest2, {
+    updateTextAreaInput(session, "ai_query", value = "Explain PARP inhibitor synergy with platinum chemotherapy")
+    Sys.sleep(0.2)
+    ask_ai_click()
+  })
+  
+  observeEvent(input$suggest3, {
+    updateTextAreaInput(session, "ai_query", value = "What biomarkers predict response to checkpoint inhibitors?")
+    Sys.sleep(0.2)
+    ask_ai_click()
+  })
+  
+  observeEvent(input$suggest4, {
+    updateTextAreaInput(session, "ai_query", value = "Summarize Phase III trials for PD-1 combination therapies")
+    Sys.sleep(0.2)
+    ask_ai_click()
+  })
+  
+  ask_ai_click <- function() {
+    query <- tolower(input$ai_query)
+    
+    if(grepl("immunotherapy|pembrolizumab|nivolumab|nsclc", query)) {
+      response <- paste0(
+        "IMMUNOTHERAPY COMBINATIONS FOR NSCLC\n\n",
+        "PEMBROLIZUMAB + CHEMOTHERAPY (Cisplatin/Pemetrexed)\n",
+        "  - Synergy Score: 52.3/100 (SYNERGISTIC)\n",
+        "  - Mechanism: Chemo-induced immunogenic cell death\n",
+        "  - KEYNOTE-189: HR 0.49 for overall survival\n",
+        "  - FDA approved for first-line treatment\n\n",
+        "NIVOLUMAB + IPILIMUMAB (Dual Checkpoint Blockade)\n",
+        "  - CheckMate-227: Improved OS regardless of PD-L1\n",
+        "  - Higher response rates in TMB-H tumors\n\n",
+        "PREDICTIVE BIOMARKERS:\n",
+        "  - PD-L1 expression (TPS/CPS)\n",
+        "  - Tumor Mutational Burden (TMB)\n",
+        "  - MSI-H/dMMR status"
+      )
+    } else if(grepl("parp", query)) {
+      response <- paste0(
+        "PARP INHIBITOR SYNERGY MECHANISM\n\n",
+        "OLAPARIB + PLATINUM CHEMOTHERAPY\n",
+        "  - Synergy Score: 65-75/100 (STRONG SYNERGY)\n",
+        "  - Mechanism: Synthetic lethality in HRD tumors\n",
+        "  - Approved for BRCA-mutated cancers\n\n",
+        "CRITICAL BIOMARKERS (Required):\n",
+        "  - BRCA1/2 mutation - ESSENTIAL\n",
+        "  - Homologous Recombination Deficiency (HRD) score\n",
+        "  - RAD51 foci formation\n\n",
+        "CLINICAL TRIALS:\n",
+        "  - POLO: 7.4 months PFS benefit in pancreatic cancer\n",
+        "  - PROfound: Improved rPFS in prostate cancer\n",
+        "  - OlympiA: Improved invasive DFS in breast cancer"
+      )
+    } else if(grepl("biomarker", query)) {
+      response <- paste0(
+        "PREDICTIVE BIOMARKERS FOR COMBINATION THERAPY\n\n",
+        "PD-L1 EXPRESSION\n",
+        "  - IHC assay (22C3, SP263, SP142 clones)\n",
+        "  - Cutoffs: 1%% (moderate), 50%% (high)\n",
+        "  - Predicts benefit from checkpoint inhibitors\n\n",
+        "TUMOR MUTATIONAL BURDEN (TMB)\n",
+        "  - TMB-H defined as >=10 mut/Mb\n",
+        "  - Predicts response to dual immunotherapy\n\n",
+        "MISMATCH REPAIR (MMR) / MSI STATUS\n",
+        "  - Pan-cancer predictor for pembrolizumab\n\n",
+        "HOMOLOGOUS RECOMBINATION DEFICIENCY (HRD)\n",
+        "  - Predicts PARP inhibitor sensitivity\n",
+        "  - Genomic instability score >=42 = HRD+"
+      )
+    } else if(grepl("phase iii|trial", query)) {
+      response <- paste0(
+        "MAJOR PHASE III TRIALS FOR COMBINATION THERAPY\n\n",
+        "KEYNOTE-189 (NSCLC)\n",
+        "  - Regimen: Pembrolizumab + Pemetrexed + Platinum\n",
+        "  - HR for OS: 0.49 (p < 0.0001)\n\n",
+        "CheckMate-9LA (NSCLC)\n",
+        "  - Regimen: Nivolumab + Ipilimumab + Chemo\n",
+        "  - HR for OS: 0.79 (p = 0.011)\n\n",
+        "KEYNOTE-355 (TNBC)\n",
+        "  - Regimen: Pembrolizumab + Chemotherapy\n",
+        "  - HR for PFS: 0.65 (CPS >=10)\n\n",
+        "POLO (Pancreatic, BRCA mutant)\n",
+        "  - Regimen: Olaparib maintenance\n",
+        "  - Median PFS: 7.4 vs 3.8 months"
+      )
+    } else {
+      response <- paste0(
+        "AI ASSISTANT RESPONSE\n\n",
+        "Based on current literature and clinical trial data:\n\n",
+        "- The combination landscape in oncology is rapidly evolving\n",
+        "- Major trials are investigating IO + IO and IO + targeted combinations\n",
+        "- Biomarker-driven selection is crucial for optimal outcomes\n\n",
+        "Tip: Try asking about specific drug names, cancer types,\n",
+        "biomarkers, or clinical trials for more detailed responses!"
+      )
+    }
+    
+    output$ai_response <- renderText({ response })
+  }
+  
+  # Automatic ask trigger via observe
+  observeEvent(input$ask_ai, {
+    ask_ai_click()
+  })
+  
+  # Prediction
+  observeEvent(input$predict_btn, {
+    values$current_prediction <- predict_synergy(input$drug1, input$drug2, input$cancer_type)
+    values$current_explanation <- get_ai_explanation(
+      input$drug1, input$drug2, input$cancer_type,
+      values$current_prediction$loewe_score,
+      values$current_prediction$synergy_class
+    )
+    
+    showNotification(
+      paste("Analysis complete:", input$drug1, "+", input$drug2),
+      type = "message",
+      duration = 3
+    )
+  })
+  
+  # Predicted score value box
+  output$predicted_score <- renderValueBox({
+    if(is.null(values$current_prediction)) {
+      valueBox(
+        value = tags$div(style = "font-size: 18px;", "Ready to Predict"),
+        subtitle = "Select drugs and click the button",
+        icon = icon("magic"),
+        color = "purple"
+      )
+    } else {
+      score <- values$current_prediction$loewe_score
+      color <- ifelse(score > 35, "green", ifelse(score > 0, "yellow", "red"))
+      valueBox(
+        value = tags$div(style = "font-size: 32px; font-weight: bold;", paste0(round(score, 1), "/100")),
+        subtitle = tags$div(style = "font-size: 14px;", 
+                            paste("Synergy Score -", values$current_prediction$synergy_class)),
+        icon = icon("chart-line"),
+        color = color
+      )
+    }
+  })
+  
+  # Synergy result text
+  output$synergy_result <- renderText({
+    if(is.null(values$current_prediction)) {
+      "Ready for analysis - select drugs and cancer type above"
+    } else {
+      paste("RESULT:", values$current_prediction$drug1, "+", 
+            values$current_prediction$drug2, "for", values$current_prediction$cancer_type, 
+            "Cancer ->", values$current_prediction$synergy_class, 
+            "Combination | Clinical Status:", values$current_prediction$clinical_trial_phase)
+    }
+  })
+  
+  # AI explanation
+  output$ai_explanation <- renderText({
+    if(is.null(values$current_explanation)) {
+      "Click 'Predict Synergy' to receive AI-powered mechanistic explanation with clinical evidence, biomarker guidance, and recommended validation pathways."
+    } else {
+      values$current_explanation
+    }
+  })
+  
+  # AI Assistant responses
+  output$ai_response <- renderText({
+    "Ask a question about drug combinations, mechanisms, or clinical trials using the box above."
+  })
+  
+  # Top combinations table
+  output$top_combinations_table <- renderDT({
+    top_combos <- synergy_data %>%
+      filter(loewe_score > 35) %>%
+      arrange(desc(loewe_score)) %>%
+      head(20) %>%
+      select(
+        `First Drug` = drug1, 
+        `Second Drug` = drug2, 
+        `Cancer Type` = cancer_type, 
+        `Synergy Score` = loewe_score, 
+        `Phase` = clinical_trial_phase,
+        `Classification` = synergy_class
+      )
+    
+    datatable(top_combos, 
+              options = list(
+                pageLength = 10, 
+                scrollX = TRUE,
+                dom = 'Bfrtip',
+                buttons = c('copy', 'csv')
+              ),
+              rownames = FALSE, 
+              class = 'cell-border stripe hover') %>%
+      formatRound(columns = "Synergy Score", digits = 1) %>%
+      formatStyle("Synergy Score",
+                  background = styleColorBar(c(20, 100), "#F06292"),
+                  backgroundSize = '100% 90%',
+                  backgroundRepeat = 'no-repeat')
+  })
+  
+  # Synergy heatmap
+  output$synergy_heatmap <- renderPlotly({
+    top_drugs <- unique(c(synergy_data$drug1, synergy_data$drug2))[1:10]
+    heatmap_data <- matrix(0, nrow = length(top_drugs), ncol = length(top_drugs))
+    rownames(heatmap_data) <- top_drugs
+    colnames(heatmap_data) <- top_drugs
+    
+    for(i in 1:length(top_drugs)) {
+      for(j in 1:length(top_drugs)) {
+        if(i != j) {
+          match_idx <- which(
+            (synergy_data$drug1 == top_drugs[i] & synergy_data$drug2 == top_drugs[j]) |
+              (synergy_data$drug1 == top_drugs[j] & synergy_data$drug2 == top_drugs[i])
+          )
+          if(length(match_idx) > 0) {
+            heatmap_data[i, j] <- mean(synergy_data$loewe_score[match_idx], na.rm = TRUE)
+          } else {
+            heatmap_data[i, j] <- NA
+          }
+        }
+      }
+    }
+    
+    plot_ly(z = heatmap_data, x = top_drugs, y = top_drugs, type = "heatmap",
+            colorscale = list(c(0, "#C2185B"), c(0.5, "#F8BBD0"), c(1, "#9B59B6")),
+            hovertemplate = "%{x} + %{y}<br>Synergy Score: %{z:.1f}<extra></extra>",
+            showscale = TRUE) %>%
+      layout(title = list(text = "Drug Synergy Interaction Matrix", 
+                          font = list(color = "#C2185B", size = 16, weight = "bold")),
+             xaxis = list(title = "", tickangle = -45, tickfont = list(size = 11)),
+             yaxis = list(title = "", tickfont = list(size = 11)),
+             plot_bgcolor = '#FCE4EC',
+             paper_bgcolor = '#FCE4EC',
+             height = 600)
+  })
+  
+  # Cancer boxplot
+  output$cancer_boxplot <- renderPlotly({
+    p <- ggplot(synergy_data, aes(x = cancer_type, y = loewe_score, fill = cancer_type)) +
+      geom_boxplot(alpha = 0.8, outlier.size = 3, outlier.color = "#E91E63", 
+                   outlier.alpha = 0.6, width = 0.6) +
+      geom_hline(yintercept = 35, linetype = "dashed", color = "#E91E63", size = 1.2, alpha = 0.7) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "#9B59B6", size = 1, alpha = 0.5) +
+      scale_fill_manual(values = c(
+        "Breast" = "#F06292",
+        "Lung" = "#E91E63",
+        "Colorectal" = "#C2185B",
+        "Pancreatic" = "#9B59B6",
+        "Ovarian" = "#7B2D8E",
+        "Melanoma" = "#4A0E4E"
+      )) +
+      theme_minimal(base_size = 12) +
+      theme(
+        plot.background = element_rect(fill = "transparent", color = NA),
+        panel.background = element_rect(fill = "white", color = NA),
+        panel.grid.major = element_line(color = "#F3E5F5", size = 0.5),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5, color = "#C2185B", size = 16, face = "bold"),
+        axis.title.y = element_text(color = "#6A1B9A", face = "bold"),
+        legend.position = "none"
+      ) +
+      labs(title = "Synergy Scores by Cancer Type", 
+           x = "", 
+           y = "Loewe Synergy Score (0-100)")
+    
+    ggplotly(p) %>%
+      layout(plot_bgcolor = '#FCE4EC', paper_bgcolor = '#FCE4EC')
+  })
+  
+  # Phase pie chart
+  output$phase_pie <- renderPlotly({
+    phase_counts <- table(synergy_data$clinical_trial_phase)
+    plot_ly(labels = names(phase_counts), values = as.numeric(phase_counts), type = "pie",
+            marker = list(colors = c("#E91E63", "#F06292", "#C2185B", "#9B59B6")),
+            textinfo = "label+percent",
+            hovertemplate = "%{label}<br>Count: %{value}<extra></extra>") %>%
+      layout(title = list(text = "Clinical Trial Phase Distribution", 
+                          font = list(color = "#C2185B", size = 16)),
+             plot_bgcolor = '#FCE4EC',
+             paper_bgcolor = '#FCE4EC')
+  })
+  
+  # Value boxes
+  output$total_combinations <- renderValueBox({
+    valueBox(
+      value = tags$div(style = "font-size: 32px;", format(nrow(synergy_data), big.mark = ",")),
+      subtitle = "Total Drug Combinations Analyzed",
+      icon = icon("capsules"),
+      color = "purple"
+    )
+  })
+  
+  output$synergistic_count <- renderValueBox({
+    n_synergistic <- sum(synergy_data$loewe_score > 35)
+    pct <- round(n_synergistic/nrow(synergy_data)*100, 1)
+    valueBox(
+      value = tags$div(style = "font-size: 28px;", paste0(pct, "%")),
+      subtitle = "Synergistic Combinations (Score > 35)",
+      icon = icon("thumbs-up"),
+      color = "green"
+    )
+  })
+  
+  output$clinical_trials <- renderValueBox({
+    n_trials <- sum(grepl("Phase II|Phase III", synergy_data$clinical_trial_phase))
+    valueBox(
+      value = tags$div(style = "font-size: 28px;", n_trials),
+      subtitle = "Advanced Phase Clinical Trials",
+      icon = icon("hospital"),
+      color = "blue"
+    )
+  })
+  
+  # Full data table
+  output$full_data_table <- renderDT({
+    display_data <- synergy_data %>%
+      select(`Drug 1` = drug1, `Drug 2` = drug2, `Cancer Type` = cancer_type,
+             `Loewe Score` = loewe_score, `Bliss Score` = bliss_score, 
+             `ZIP Score` = zip_score, `Phase` = clinical_trial_phase, 
+             `Classification` = synergy_class)
+    
+    datatable(display_data, 
+              options = list(
+                pageLength = 25, 
+                scrollX = TRUE,
+                dom = 'Bfrtip',
+                buttons = c('copy', 'csv', 'excel')
+              ),
+              rownames = FALSE,
+              class = 'cell-border stripe hover') %>%
+      formatRound(columns = c("Loewe Score", "Bliss Score", "ZIP Score"), digits = 1) %>%
+      formatStyle("Loewe Score",
+                  background = styleColorBar(c(-20, 100), "#F06292"),
+                  backgroundSize = '100% 90%',
+                  backgroundRepeat = 'no-repeat')
+  })
+}
+
+# Run the app
+shinyApp(ui = ui, server = server)

@@ -1,0 +1,6 @@
+echo .Rproj.user > .gitignore
+echo .Rhistory >> .gitignore
+echo .RData >> .gitignore
+echo *.rds >> .gitignore
+echo .DS_Store >> .gitignore
+echo Thumbs.db >> .gitignore
