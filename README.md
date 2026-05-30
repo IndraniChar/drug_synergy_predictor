@@ -56,4 +56,38 @@
 
 ---
 
-## 🖥️ Technical Architecture
+
+### Technology Stack
+
+| Component | Technology |
+|-----------|------------|
+| Frontend | R Shiny, shinydashboard |
+| ML Engine | Ensemble learning (synergy scoring) |
+| Gen-AI | LLM-powered mechanistic explanations |
+| Visualization | ggplot2, plotly, interactive heatmaps |
+| Database | Synthetic clinical trial data (350+ combinations) |
+| Deployment | shinyapps.io + GitHub |
+
+---
+
+## 🚀 Run Locally
+
+### Prerequisites
+
+```r
+# Install required packages
+install.packages(c(
+  "shiny", "shinydashboard", "tidyverse", 
+  "ggplot2", "plotly", "DT"
+))
+
+ Performance Dashboard
+After running the app, you can:
+
+Explore top 20 synergistic combinations with scores > 35/100
+
+View heatmaps showing interaction matrices
+
+Ask AI assistant about mechanisms and biomarkers
+
+Export data for further analysis
