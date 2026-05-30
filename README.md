@@ -81,7 +81,8 @@ install.packages(c(
   "ggplot2", "plotly", "DT"
 ))
 
- Performance Dashboard
+
+## 📈Performance Dashboard
 After running the app, you can:
 
 Explore top 20 synergistic combinations with scores > 35/100
